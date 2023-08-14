@@ -1,0 +1,82 @@
+#version 460
+
+#define MAX_STEPS 32
+#define STEP 0.01
+#define TOLERANCE 0.01
+
+/*glslViewer style uniform*/
+uniform vec2 u_resolution;
+
+layout(local_size_x = 1, local_size_y = 1,local_size_z = 1) in;
+layout(rgba32f, binding = 0) uniform image2D img;
+layout(location = 0) uniform float u_time;
+
+float sphere(vec3 p) { return length(p-vec3(0.0,0.0+0.5*sin(u_time),1.5))-0.5; }
+float ground(vec3 p) { return p.y + 0.5; }
+float scene(vec3 p) { return min(sphere(p),ground(p)); }
+
+/*gradient function -AODQ*/
+vec3 normal(vec3 p) {
+	vec2 e = vec2(1.0, -1.0)*0.5773*0.0005;
+	return normalize(
+		(e.xyy*scene(p + e.xyy)) +
+		(e.yyx*scene(p + e.yyx)) +
+		(e.yxy*scene(p + e.yxy)) +
+		(e.xxx*scene(p + e.xxx)));
+}
+
+void main(void) {
+	vec4 color=vec4(vec3(0.0),1.0);
+  vec2 u_resolution = gl_NumWorkGroups.xy;
+	bool quit = false;
+	/*map screen space to ray*/
+	vec2 coord = vec2(gl_GlobalInvocationID.xy - u_resolution.xy/2.0);
+	vec3 view = vec3(coord.xy/u_resolution.x, 0.5);
+	float depth = length(view);
+	vec3 ray = view;
+	view = normalize(view);
+	for(int i=0; i<MAX_STEPS && !quit;i++) {
+		float temp = scene(ray);
+		depth+=temp;
+		ray = view*(depth+STEP);
+		if(temp <= TOLERANCE) {
+			/*materials*/
+			float ks, kd, ka , alpha;
+			ks=kd=ka=0.25;
+			alpha=4.0;
+			vec3 is, id, ia, ip;
+
+			/*vectors*/
+			vec3 n, v, r, l;
+			n=v=r=l=vec3(0.0);
+			n = normal(ray);
+			v = normalize(-ray);
+			if(sphere(ray) <= TOLERANCE) {
+				//color=vec4(1.0,0.0,0.0,1.0);
+				is = vec3(1.0,1.0,1.0);
+				id = vec3(1.0,0.0,0.0);
+				ia = vec3(1.0,0.0,0.0);
+				ka = 0.125;
+				kd = 0.4;
+				ks = 0.4;
+				alpha = 10.0;
+			}
+			if(ground(ray) <= TOLERANCE) {
+				//color=vec4(0.0,0.0,1.0,1.0);
+				is = vec3(0.0,0.0,1.0);
+				id = vec3(0.0,0.0,1.0);
+				ia = vec3(0.0,0.0,1.0);
+				ka = 0.0;
+				kd = 0.25;
+				ks = 0.5;
+			}
+			l = normalize(vec3(0.5,0.5,0.5) - ray);
+			r = -reflect(l, n);
+			ip = ka*ia + id*(kd*dot(l, n)) 
+			   + is*(ks*pow(clamp(dot(r, v),0.0,1.0),alpha));
+			quit = true;
+			color=vec4(ip,1.0);
+		}
+	}
+  imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
+}
